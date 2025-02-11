@@ -1,0 +1,79 @@
+{
+  "name": "spring-api-helper",
+  "displayName": "Spring API Helper",
+  "description": "Spring Controller API文档生成与测试工具",
+  "version": "0.0.1",
+  "publisher": "wangrc",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "spring",
+    "api",
+    "documentation",
+    "mock",
+    "http"
+  ],
+  "icon": "pluginIcon.png",
+  "galleryBanner": {
+    "color": "#C80000",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/spring-api-helper.git"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "spring-api-helper.generateDocs",
+        "title": "生成API文档",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.sendRequest",
+        "title": "发送HTTP请求",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.generateMock",
+        "title": "生成Mock数据",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.uploadApiDocs",
+        "title": "上传API文档到Apifox",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.configureApifox",
+        "title": "配置Apifox",
+        "category": "Spring API Helper"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "java-parser": "^2.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^16.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^4.9.0",
+    "@vscode/vsce": "^2.15.0"
+  }
+}
