@@ -206,4 +206,12 @@ public class UserController {
 4. 使用内置调试器（F5）测试插件
 5. 用`@ AI: 生成单元测试`创建测试用例
 
+### 使用教程
+
+1. 安装插件，在插件市场搜索wangrc.vs-apifox-helper
+2. ctrl+shift+p 输入spring-api-helper.uploadApiDocs 上传API文档到Apifox
+3. 根据提示输入Apifox的API Key，项目id，项目名称
+4. 上传成功后，在Apifox中查看生成的API文档
+
+
 建议结合VS Code Extension API文档（可让Cursor实时检索）进行开发，典型开发周期约2-3周。重点优先实现AST解析和文档生成模块，其余功能可后续迭代。
