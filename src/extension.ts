@@ -73,7 +73,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 注册API列表视图
     const apiTreeProvider = new ApiTreeProvider();
-    vscode.window.registerTreeDataProvider('apiList', apiTreeProvider);
+    vscode.window.registerTreeDataProvider('vs-apifox-helper-apiList', apiTreeProvider);
     
     // 注册搜索命令
     let searchApiDisposable = vscode.commands.registerCommand('spring-api-helper.searchApi', async () => {

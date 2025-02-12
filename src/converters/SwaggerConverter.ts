@@ -10,10 +10,10 @@ export class SwaggerConverter {
     // 遍历所有接口
     for (const endpoint of apiDocs) {
       const pathItem = paths[endpoint.path] || {};
-      
+
       // 转换HTTP方法
       pathItem[endpoint.method.toLowerCase()] = {
-        tags: [endpoint.apifoxFolder],
+        tags: [this.projectName + "/" + endpoint.apifoxFolder],
         summary: endpoint.description || "",
         description: endpoint.description || "",
         operationId: this.getOperationId(endpoint),
@@ -24,17 +24,11 @@ export class SwaggerConverter {
         responses: {
           "200": {
             description: "successful operation",
-            schema: this.getResponseSchema(endpoint.responseType)
-          },
-          "400": {
-            description: "Invalid request"
-          },
-          "404": {
-            description: "Resource not found"
+            schema: this.getResponseSchema(endpoint.responseType),
           }
-        }
+        },
       };
-      
+
       paths[endpoint.path] = pathItem;
     }
 
@@ -46,12 +40,12 @@ export class SwaggerConverter {
         description: "API documentation generated from Spring Controllers",
         version: "1.0.0",
         contact: {
-          email: ""
+          email: "",
         },
         license: {
           name: "Apache 2.0",
-          url: "http://www.apache.org/licenses/LICENSE-2.0.html"
-        }
+          url: "http://www.apache.org/licenses/LICENSE-2.0.html",
+        },
       },
       host: "",
       basePath: "/",
@@ -62,27 +56,30 @@ export class SwaggerConverter {
         api_key: {
           type: "apiKey",
           name: "Authorization",
-          in: "header"
-        }
+          in: "header",
+        },
       },
-      definitions: this.getDefinitions(apiDocs)
+      definitions: this.getDefinitions(apiDocs),
     };
   }
 
   private getTags(apiDocs: ApiEndpoint[]) {
-    const uniqueFolders = [...new Set(apiDocs.map(doc => doc.apifoxFolder))];
-    return uniqueFolders.map(folder => ({
+    const uniqueFolders = [...new Set(apiDocs.map((doc) => doc.apifoxFolder))];
+    return uniqueFolders.map((folder) => ({
       name: folder,
-      description: `APIs in ${folder}`
+      description: `APIs in ${folder}`,
     }));
   }
 
   private getOperationId(endpoint: ApiEndpoint): string {
-    return `${endpoint.method.toLowerCase()}${endpoint.path.replace(/[\/\-{}]/g, '_')}`;
+    return `${endpoint.method.toLowerCase()}${endpoint.path.replace(
+      /[\/\-{}]/g,
+      "_"
+    )}`;
   }
 
   private convertParameters(params: ApiParameter[]) {
-    return params.map(param => {
+    return params.map((param) => {
       if (param.parameterType === "body") {
         return {
           in: "body",
@@ -90,8 +87,8 @@ export class SwaggerConverter {
           description: param.description || "",
           required: param.required,
           schema: {
-            $ref: `#/definitions/${param.name}`
-          }
+            $ref: `#/definitions/${param.name}`,
+          },
         };
       }
 
@@ -101,7 +98,7 @@ export class SwaggerConverter {
         description: param.description || "",
         required: param.required,
         type: this.getParameterType(param.type),
-        format: this.getParameterFormat(param.type)
+        format: this.getParameterFormat(param.type),
       };
     });
   }
@@ -117,7 +114,7 @@ export class SwaggerConverter {
       Date: "string",
       LocalDate: "string",
       LocalDateTime: "string",
-      BigDecimal: "number"
+      BigDecimal: "number",
     };
     return typeMap[type] || "string";
   }
@@ -130,56 +127,62 @@ export class SwaggerConverter {
       Float: "float",
       Date: "date",
       LocalDate: "date",
-      LocalDateTime: "date-time"
+      LocalDateTime: "date-time",
     };
     return formatMap[type];
   }
 
   private getResponseSchema(type: string): any {
-    if (type.startsWith("List<") || type.startsWith("Set<") || type.startsWith("Collection<")) {
+    if (
+      type.startsWith("List<") ||
+      type.startsWith("Set<") ||
+      type.startsWith("Collection<")
+    ) {
       const itemType = type.match(/<(.+)>/)?.[1] || "Object";
       return {
         type: "array",
         items: {
-          type: this.getParameterType(itemType)
-        }
+          type: this.getParameterType(itemType),
+        },
       };
     }
 
     if (type === "void") {
       return {
-        type: "object"
+        type: "object",
       };
     }
 
     return {
-      type: this.getParameterType(type)
+      type: this.getParameterType(type),
     };
   }
 
   private getDefinitions(apiDocs: ApiEndpoint[]): Definitions {
-    const params = apiDocs.map(doc => doc.parameters).flat();
+    const params = apiDocs.map((doc) => doc.parameters).flat();
     const definitions: Definitions = {};
 
     params
-      .filter(param => param.type === "object" && param.object)
-      .forEach(param => {
+      .filter((param) => param.type === "object" && param.object)
+      .forEach((param) => {
         const properties: any = {};
-        
-        Object.entries(param.object as any).forEach(([key, value]: [string, any]) => {
-          properties[key] = {
-            type: this.getParameterType(value.type),
-            format: this.getParameterFormat(value.type),
-            description: value.description || ""
-          };
-        });
+
+        Object.entries(param.object as any).forEach(
+          ([key, value]: [string, any]) => {
+            properties[key] = {
+              type: this.getParameterType(value.type),
+              format: this.getParameterFormat(value.type),
+              description: value.description || "",
+            };
+          }
+        );
 
         definitions[param.name] = {
           type: "object",
           properties,
           xml: {
-            name: param.name
-          }
+            name: param.name,
+          },
         };
       });
 

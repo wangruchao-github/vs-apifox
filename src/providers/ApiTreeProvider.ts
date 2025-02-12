@@ -55,7 +55,7 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
                     `${api.method} ${api.path}`,
                     api.id,
                     vscode.TreeItemCollapsibleState.None,
-                    'api',
+                    'springApi',
                     undefined,
                     undefined,
                     this.selectedApis.has(api.id),

@@ -43,7 +43,7 @@
     "views": {
       "spring-api-helper": [
         {
-          "id": "apiList",
+          "id": "vs-apifox-helper-apiList",
           "name": "API列表"
         }
       ]
@@ -105,7 +105,6 @@
       {
         "command": "spring-api-helper.searchApi",
         "title": "搜索API",
-        "icon": "$(search)",
         "category": "Spring API Helper"
       }
     ],
@@ -113,29 +112,29 @@
       "view/title": [
         {
           "command": "spring-api-helper.searchApi",
-          "when": "view == apiList",
+          "when": "view == vs-apifox-helper-apiList",
           "group": "navigation@0"
         },
         {
           "command": "spring-api-helper.refreshApiList",
-          "when": "view == apiList",
+          "when": "view == vs-apifox-helper-apiList",
           "group": "navigation@1"
         },
         {
           "command": "spring-api-helper.syncSelectedApis",
-          "when": "view == apiList",
+          "when": "view == vs-apifox-helper-apiList",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "spring-api-helper.toggleSelectApi",
-          "when": "view == apiList && viewItem == api",
+          "when": "view == vs-apifox-helper-apiList && viewItem == springApi",
           "group": "inline@1"
         },
         {
           "command": "spring-api-helper.gotoDefinition",
-          "when": "view == apiList && viewItem == api",
+          "when": "view == vs-apifox-helper-apiList && viewItem == springApi",
           "group": "inline@2"
         }
       ]

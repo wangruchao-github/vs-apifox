@@ -54,7 +54,7 @@ export class SpringControllerParser {
   }
   private parseApifoxFolder(): string {
     // 先尝试获取类级别的注释
-    const classCommentRegex = /\/\*\*\s*([\s\S]*?)\s*\*\//;
+    const classCommentRegex = /@apiFolder(.*)/;
     const classMatch = this.code.match(classCommentRegex);
     if (classMatch) {
       return classMatch[1]
