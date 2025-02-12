@@ -4,6 +4,7 @@ import { SpringControllerParser } from './parser/SpringControllerParser.js';
 import { MockDataGenerator } from './generators/MockDataGenerator.js';
 import { ApifoxService } from './services/ApifoxService.js';
 import { ConfigService } from './services/ConfigService.js';
+import { ApiTreeProvider } from './providers/ApiTreeProvider.js';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('扩展已激活');
@@ -70,12 +71,53 @@ export function activate(context: vscode.ExtensionContext) {
         generator.generate();
     });
 
+    // 注册API列表视图
+    const apiTreeProvider = new ApiTreeProvider();
+    vscode.window.registerTreeDataProvider('apiList', apiTreeProvider);
+    
+    // 注册搜索命令
+    let searchApiDisposable = vscode.commands.registerCommand('spring-api-helper.searchApi', async () => {
+        const searchText = await vscode.window.showInputBox({
+            prompt: '请输入搜索关键词',
+            placeHolder: '支持搜索路径、方法、描述和文件夹'
+        });
+        
+        if (searchText !== undefined) {
+            apiTreeProvider.search(searchText);
+        }
+    });
+
+    // 注册刷新命令
+    let refreshApiListDisposable = vscode.commands.registerCommand('spring-api-helper.refreshApiList', () => {
+        apiTreeProvider.refresh();
+    });
+    
+    // 注册选择API命令
+    let toggleSelectApiDisposable = vscode.commands.registerCommand('spring-api-helper.toggleSelectApi', (api) => {
+        apiTreeProvider.toggleSelect(api);
+    });
+    
+    // 注册同步选中APIs命令
+    let syncSelectedApisDisposable = vscode.commands.registerCommand('spring-api-helper.syncSelectedApis', () => {
+        apiTreeProvider.syncSelected();
+    });
+
+    // 注册跳转到定义命令
+    let gotoDefinitionDisposable = vscode.commands.registerCommand('spring-api-helper.gotoDefinition', (api) => {
+        apiTreeProvider.gotoDefinition(api);
+    });
+
     // 将所有命令添加到订阅列表
     context.subscriptions.push(generateDocsDisposable);
     context.subscriptions.push(sendRequestDisposable);
     context.subscriptions.push(generateMockDisposable);
     context.subscriptions.push(configureApifoxDisposable);
     context.subscriptions.push(uploadApiDocsDisposable);
+    context.subscriptions.push(refreshApiListDisposable);
+    context.subscriptions.push(toggleSelectApiDisposable);
+    context.subscriptions.push(syncSelectedApisDisposable);
+    context.subscriptions.push(gotoDefinitionDisposable);
+    context.subscriptions.push(searchApiDisposable);
 }
 
 export function deactivate() {

@@ -17,7 +17,7 @@ export class ApifoxService {
         try {
             // 转换为OpenAPI格式
             const converter = new SwaggerConverter(this.projectName);
-            const openApiSpec = converter.convert(apiDocs);
+            const openApiSpec = converter.convert(apiDocs);            
             // 上传到Apifox
             const response = await axios.post(
                 `https://api.apifox.cn/v1/projects/${this.projectId}/import-openapi`,

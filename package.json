@@ -31,6 +31,23 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "spring-api-helper",
+          "title": "Spring API Helper",
+          "icon": "resources/api.svg"
+        }
+      ]
+    },
+    "views": {
+      "spring-api-helper": [
+        {
+          "id": "apiList",
+          "name": "API列表"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "spring-api-helper.generateDocs",
@@ -56,8 +73,73 @@
         "command": "spring-api-helper.configureApifox",
         "title": "配置Apifox",
         "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.refreshApiList",
+        "title": "刷新API列表",
+        "icon": "$(refresh)",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.syncSelectedApi",
+        "title": "同步到Apifox",
+        "icon": "$(cloud-upload)",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.toggleSelectApi",
+        "title": "选择接口",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.syncSelectedApis",
+        "title": "同步选中的接口",
+        "icon": "$(cloud-upload)",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.gotoDefinition",
+        "title": "跳转到定义",
+        "category": "Spring API Helper"
+      },
+      {
+        "command": "spring-api-helper.searchApi",
+        "title": "搜索API",
+        "icon": "$(search)",
+        "category": "Spring API Helper"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "spring-api-helper.searchApi",
+          "when": "view == apiList",
+          "group": "navigation@0"
+        },
+        {
+          "command": "spring-api-helper.refreshApiList",
+          "when": "view == apiList",
+          "group": "navigation@1"
+        },
+        {
+          "command": "spring-api-helper.syncSelectedApis",
+          "when": "view == apiList",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "spring-api-helper.toggleSelectApi",
+          "when": "view == apiList && viewItem == api",
+          "group": "inline@1"
+        },
+        {
+          "command": "spring-api-helper.gotoDefinition",
+          "when": "view == apiList && viewItem == api",
+          "group": "inline@2"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

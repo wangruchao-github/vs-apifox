@@ -28,13 +28,20 @@ export class SpringControllerParser {
           console.log("方法:", methodComment);
           if (httpMethod) {
             const parameters = await this.parseParameters(method);
+            const location = this.getMethodLocation(method);
             endpoints.push({
+              id: `${httpMethod}:${this.joinPaths(rootPath, methodPath)}`,
               path: this.joinPaths(rootPath, methodPath),
               method: httpMethod,
               description: methodComment,
               parameters: parameters,
               responseType: this.parseReturnType(method),
               apifoxFolder: apifoxFolder,
+              location: {
+                filePath: file.fsPath,
+                line: location.line,
+                character: location.character
+              }
             });
           }
         }
@@ -332,7 +339,6 @@ export class SpringControllerParser {
       );
       console.log("files:", files);
       const fileContent = await this.readFile(files[0]);
-      console.log("fileContent:", fileContent);
       return fileContent;
     } catch (error) {
       console.error("findReqBodyFile error:", error);
@@ -364,8 +370,18 @@ export class SpringControllerParser {
         .toString("utf-8")
         // .replace(/\/\*[\s\S]*?\*\//g, '')  // 删除块注释
         // .replace(/\/\/.*/g, '')           // 删除行注释
-        .replace(/\s+/g, " ") // 压缩空格
-        .replace(/@\s+/g, "@")
+        // .replace(/\s+/g, " ") // 压缩空格
+        // .replace(/@\s+/g, "@")
     ); // 清理注解格式
+  }
+
+  private getMethodLocation(methodCode: string): { line: number; character: number } {
+    const methodIndex = this.code.indexOf(methodCode);
+    const codeBeforeMethod = this.code.substring(0, methodIndex);
+    const lines = codeBeforeMethod.split('\n');
+    return {
+      line: lines.length - 1,
+      character: lines[lines.length - 1].length
+    };
   }
 }

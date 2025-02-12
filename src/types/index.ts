@@ -1,10 +1,16 @@
 export interface ApiEndpoint {
+    id: string;
     path: string;
     method: string;
     description?: string;
     parameters: ApiParameter[];
     responseType: string;
     apifoxFolder: string;
+    location: {
+        filePath: string;
+        line: number;
+        character: number;
+    };
 }
 
 export interface ApiParameter {
