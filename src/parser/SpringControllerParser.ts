@@ -284,13 +284,16 @@ export class SpringControllerParser {
     const paramsMatch = methodCode.match(reqParamsRegex);
     if (paramsMatch) {
       const reqParams = paramsMatch[1].split(",");
-      for (const param of reqParams) {
+      for (const param of reqParams) {        
         if (
           param.indexOf("@PathVariable") === -1 &&
           param.indexOf("@RequestParam") === -1 &&
           param.indexOf("@RequestBody") === -1
         ) {
           const paramArr = param.trim().split(" ");
+          if((paramArr.length > 1 && paramArr[1] == "=") || paramArr.length <= 1) {
+            continue;
+          }
           const reqBodyFileContent = await this.findReqBodyFile(
             this.code,
             paramArr[0]
