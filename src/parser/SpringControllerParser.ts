@@ -211,7 +211,7 @@ export class SpringControllerParser {
   }
 
   private parseMethodPath(methodCode: string): string {
-    const pathRegex = /@\w+Mapping\((?:value\s*=\s*)?["']([^"']+)["']\)/;
+    const pathRegex = /@\w+Mapping\(\s*(?:value\s*=\s*)?"([^"]+)"/;
     const match = methodCode.match(pathRegex);
     if (!match) return "";
     return match[1].replace(/"/g, "");
@@ -343,7 +343,6 @@ export class SpringControllerParser {
       const fileContent = await this.readFile(files[0]);
       return fileContent;
     } catch (error: any) {
-      console.error("findReqBodyFile error:", error.message);
       return "";
     }
   }
