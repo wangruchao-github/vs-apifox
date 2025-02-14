@@ -36,11 +36,11 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
                 folder,
                 folder,
                 vscode.TreeItemCollapsibleState.Expanded,
-                'folder',
+                'apiFolder',
                 undefined,
                 apis.filter(api => api.apifoxFolder === folder).length
             )));
-        } else if (element.contextValue === 'folder') {
+        } else if (element.contextValue === 'apiFolder') {
             // 文件夹节点，显示该文件夹下的接口
             let apis = this.apiDocs.filter(api => api.apifoxFolder === element.id);
             if (this.searchText) {
@@ -55,7 +55,7 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
                     `${api.method} ${api.path}`,
                     api.id,
                     vscode.TreeItemCollapsibleState.None,
-                    'springApi',
+                    'aDfGkMpQrStU',
                     undefined,
                     undefined,
                     this.selectedApis.has(api.id),
@@ -73,7 +73,7 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
         this._onDidChangeTreeData.fire();
     }
 
-    toggleSelect(api: ApiEndpoint) {
+    toggleSelect(api: ApiEndpoint) {    
         if (this.selectedApis.has(api.id)) {
             this.selectedApis.delete(api.id);
         } else {
@@ -160,10 +160,11 @@ class ApiTreeItem extends vscode.TreeItem {
     ) {
         super(label, collapsibleState);
         
+        this.resourceUri = vscode.Uri.parse(`apifox-helper:${label}`);
         this.tooltip = description || label;
-        this.description = description || (childCount !== undefined ? `(${childCount})` : id);
+        this.description = description || (childCount !== undefined ? `(${childCount})` : '');
         
-        this.iconPath = contextValue === 'folder' 
+        this.iconPath = contextValue === 'apiFolder' 
             ? new vscode.ThemeIcon('folder')
             : new vscode.ThemeIcon(checked ? 'check' : 'circle-outline');
 

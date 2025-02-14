@@ -13,7 +13,6 @@
   "keywords": [
     "spring",
     "api",
-    "documentation",
     "mock",
     "http"
   ],
@@ -43,7 +42,7 @@
     "views": {
       "spring-api-helper": [
         {
-          "id": "vs-apifox-helper-apiList",
+          "id": "apiFoxHelper.view",
           "name": "API列表"
         }
       ]
@@ -89,6 +88,7 @@
       {
         "command": "spring-api-helper.toggleSelectApi",
         "title": "选择接口",
+        "icon": "$(add)",
         "category": "Spring API Helper"
       },
       {
@@ -100,11 +100,13 @@
       {
         "command": "spring-api-helper.gotoDefinition",
         "title": "跳转到定义",
+        "icon": "$(go-to-file)",
         "category": "Spring API Helper"
       },
       {
         "command": "spring-api-helper.searchApi",
         "title": "搜索API",
+        "icon": "$(search)",
         "category": "Spring API Helper"
       }
     ],
@@ -112,29 +114,29 @@
       "view/title": [
         {
           "command": "spring-api-helper.searchApi",
-          "when": "view == vs-apifox-helper-apiList",
+          "when": "view == apiFoxHelper.view",
           "group": "navigation@0"
         },
         {
           "command": "spring-api-helper.refreshApiList",
-          "when": "view == vs-apifox-helper-apiList",
+          "when": "view == apiFoxHelper.view",
           "group": "navigation@1"
         },
         {
           "command": "spring-api-helper.syncSelectedApis",
-          "when": "view == vs-apifox-helper-apiList",
+          "when": "view == apiFoxHelper.view",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "spring-api-helper.toggleSelectApi",
-          "when": "view == vs-apifox-helper-apiList && viewItem == springApi",
+          "when": "view == apiFoxHelper.view && viewItem == aDfGkMpQrStU",
           "group": "inline@1"
         },
         {
           "command": "spring-api-helper.gotoDefinition",
-          "when": "view == vs-apifox-helper-apiList && viewItem == springApi",
+          "when": "view == apiFoxHelper.view && viewItem == aDfGkMpQrStU",
           "group": "inline@2"
         }
       ]
@@ -148,8 +150,7 @@
     "publish": "vsce publish"
   },
   "dependencies": {
-    "axios": "^1.4.0",
-    "java-parser": "^2.3.3"
+    "axios": "^1.4.0"
   },
   "devDependencies": {
     "@types/node": "^16.0.0",

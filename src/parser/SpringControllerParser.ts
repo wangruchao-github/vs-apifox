@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { Buffer } from "buffer";
 import { ApiEndpoint, ApiParameter } from "../types/index.js";
+import { randomUUID } from "crypto";
 
 export class SpringControllerParser {
   private code: string = "";
@@ -30,7 +31,7 @@ export class SpringControllerParser {
             const parameters = await this.parseParameters(method);
             const location = this.getMethodLocation(method);
             endpoints.push({
-              id: `${httpMethod}:${this.joinPaths(rootPath, methodPath)}`,
+              id: randomUUID(),
               path: this.joinPaths(rootPath, methodPath),
               method: httpMethod,
               description: methodComment,
@@ -256,9 +257,10 @@ export class SpringControllerParser {
       const entityParamRegex = /private\s+(\w+)\s+(\w+)\s*;/g;
       const body = {};
       let entityMatch;
-      while (
-        (entityMatch = entityParamRegex.exec(reqBodyFileContent)) !== null
-      ) {
+      if (reqBodyFileContent != null) {
+        while (
+          (entityMatch = entityParamRegex.exec(reqBodyFileContent)) !== null
+        ) {
         (body as any)[entityMatch[2]] = {
           type: entityMatch[1],
           required: true,
@@ -266,7 +268,8 @@ export class SpringControllerParser {
             reqBodyFileContent,
             entityMatch[0]
           ),
-        };
+          };
+        }
       }
       params.push({
         name: match[2],
@@ -332,7 +335,6 @@ export class SpringControllerParser {
       const importContent = typeBeforeContent
         .substring(lastImportIndex, typeBeforeContent.length)
         .trim();
-      console.log("importContent:", importContent);
       const importContentArray = importContent.split(" ");
       const files = await this.findFileByPackagePath(
         importContentArray[1].replace(/\./g, "/")
@@ -340,8 +342,8 @@ export class SpringControllerParser {
       console.log("files:", files);
       const fileContent = await this.readFile(files[0]);
       return fileContent;
-    } catch (error) {
-      console.error("findReqBodyFile error:", error);
+    } catch (error: any) {
+      console.error("findReqBodyFile error:", error.message);
       return "";
     }
   }
