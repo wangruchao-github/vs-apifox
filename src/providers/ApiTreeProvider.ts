@@ -32,14 +32,20 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
                 );
             }
             const folders = [...new Set(apis.map(api => api.apifoxFolder))];
-            return Promise.resolve(folders.map(folder => new ApiTreeItem(
-                folder,
-                folder,
-                vscode.TreeItemCollapsibleState.Expanded,
-                'apiFolder',
-                undefined,
-                apis.filter(api => api.apifoxFolder === folder).length
-            )));
+            return Promise.resolve(folders.map(folder => {
+                // 检查该文件夹下的所有API是否都被选中
+                const folderApis = apis.filter(api => api.apifoxFolder === folder);
+                const allSelected = folderApis.every(api => this.selectedApis.has(api.id));
+                return new ApiTreeItem(
+                    folder,
+                    folder,
+                    vscode.TreeItemCollapsibleState.Expanded,
+                    'apiFolder',
+                    undefined,
+                    folderApis.length,
+                    allSelected
+                );
+            }));
         } else if (element.contextValue === 'apiFolder') {
             // 文件夹节点，显示该文件夹下的接口
             let apis = this.apiDocs.filter(api => api.apifoxFolder === element.id);
@@ -52,14 +58,14 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
             }
             return Promise.resolve(apis.map(api => {
                 return new ApiTreeItem(
-                    `${api.method} ${api.path}`,
+                    `${api.method.toUpperCase()} ${api.description || api.path}`,
                     api.id,
                     vscode.TreeItemCollapsibleState.None,
                     'aDfGkMpQrStU',
                     undefined,
                     undefined,
                     this.selectedApis.has(api.id),
-                    api.description
+                    api.path
                 );
             }));
         }
@@ -73,11 +79,26 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
         this._onDidChangeTreeData.fire();
     }
 
-    toggleSelect(api: ApiEndpoint) {    
-        if (this.selectedApis.has(api.id)) {
-            this.selectedApis.delete(api.id);
+    toggleSelect(api: ApiEndpoint | any) {
+        if (api.contextValue === 'apiFolder') {
+            // 处理文件夹选择
+            const folderApis = this.apiDocs.filter(a => a.apifoxFolder === api.id);
+            const allSelected = folderApis.every(a => this.selectedApis.has(a.id));
+            
+            if (allSelected) {
+                // 如果全部选中，则取消所有选中
+                folderApis.forEach(a => this.selectedApis.delete(a.id));
+            } else {
+                // 如果未全部选中，则选中所有
+                folderApis.forEach(a => this.selectedApis.add(a.id));
+            }
         } else {
-            this.selectedApis.add(api.id);
+            // 处理单个API选择
+            if (this.selectedApis.has(api.id)) {
+                this.selectedApis.delete(api.id);
+            } else {
+                this.selectedApis.add(api.id);
+            }
         }
         this._onDidChangeTreeData.fire();
     }
@@ -113,6 +134,9 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
                 config.projectId,
                 config.projectName
             );
+            if(selectedApis.length > 0){
+                selectedApis[0].schemas = this.apiDocs[0].schemas;
+            }
             await apifoxService.uploadApiDocs(selectedApis);
             vscode.window.showInformationMessage(`成功同步 ${selectedApis.length} 个接口`);
             this.selectedApis.clear();
@@ -124,19 +148,28 @@ export class ApiTreeProvider implements vscode.TreeDataProvider<ApiTreeItem> {
 
     async gotoDefinition(apiItem: ApiTreeItem) {
         try {
+            console.log('正在查找API定义:', apiItem.id);
             const api = this.apiDocs.find(api => api.id === apiItem.id);
             if (!api) {
                 vscode.window.showErrorMessage('找不到对应的API');
                 return;
             }
+
+            console.log('API位置信息:', api.location);
+            if (!api.location.filePath) {
+                vscode.window.showErrorMessage('API定义位置信息不完整');
+                return;
+            }
+
             const document = await vscode.workspace.openTextDocument(api.location.filePath);
-            const position = new vscode.Position(api.location.line, api.location.character);
+            const position = new vscode.Position(api.location.line - 1, api.location.character); // 行号从0开始
             const selection = new vscode.Selection(position, position);
             
             const editor = await vscode.window.showTextDocument(document);
             editor.selection = selection;
             editor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
         } catch (error) {
+            console.error('跳转失败:', error);
             vscode.window.showErrorMessage(`无法打开文件: ${error}`);
         }
     }

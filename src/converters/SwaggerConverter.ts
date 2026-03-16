@@ -19,14 +19,10 @@ export class SwaggerConverter {
         operationId: this.getOperationId(endpoint),
         produces: ["application/json"],
         consumes: ["application/json"],
-        parameters: this.convertParameters(endpoint.parameters),
+        parameters: endpoint.parameters,
         "x-apifox-folder": endpoint.apifoxFolder,
-        responses: {
-          "200": {
-            description: "successful operation",
-            schema: this.getResponseSchema(endpoint.responseType),
-          }
-        },
+        responses: endpoint.responses,
+        requestBody: endpoint.requestBody
       };
 
       paths[endpoint.path] = pathItem;
@@ -59,7 +55,10 @@ export class SwaggerConverter {
           in: "header",
         },
       },
-      definitions: this.getDefinitions(apiDocs),
+      // definitions: this.getDefinitions(apiDocs),
+      components: {
+        schemas: apiDocs[0].schemas
+      }
     };
   }
 

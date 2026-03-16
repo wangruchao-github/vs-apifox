@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { ApiEndpoint } from '../types/index.js';
-import { SwaggerConverter } from '../converters/SwaggerConverter.js';
+import { OpenAPIConverter } from '../converters/OpenAPIConverter.js';
 
 export class ApifoxService {
     private apiKey: string;
@@ -15,8 +15,8 @@ export class ApifoxService {
 
     async uploadApiDocs(apiDocs: ApiEndpoint[]) {
         try {
-            // 转换为OpenAPI格式
-            const converter = new SwaggerConverter(this.projectName);
+            // 转换为OpenAPI 3.0.1格式
+            const converter = new OpenAPIConverter(this.projectName);
             const openApiSpec = converter.convert(apiDocs);            
             // 上传到Apifox
             const response = await axios.post(
