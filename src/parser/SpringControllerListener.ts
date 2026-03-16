@@ -47,10 +47,89 @@ export class SpringControllerListener implements ParseTreeListener {
     return comments && comments.length > 0 ? comments[0].replace("//", "").trim() : "";
   }
 
+  // 从注释中提取 @apiFolder 的值
+  private extractApiFolder(comments: string[]): string {
+    if (!comments || comments.length === 0) return "";
+
+    // 遍历所有注释行，查找 @apiFolder
+    for (const comment of comments) {
+      const match = comment.match(/@apiFolder\s+(.+)/);
+      if (match) {
+        return match[1].trim();
+      }
+    }
+    return "";
+  }
+
+  // 获取类的 apiFolder（从注释中提取）
+  private getClassApiFolder(ctx: any): string {
+    const comments = this.comments.get(ctx.text);
+    return this.extractApiFolder(comments || []);
+  }
+
   // 修改获取参数注释的辅助方法
   private findParamComment(ctx: any, paramName: string): string {
     const comments = this.comments.get(ctx.text);
     return comments && comments.length > 0 ? comments[0].replace("//", "").trim() : "";
+  }
+
+  // 从方法名生成可读的描述（驼峰转空格分隔）
+  private generateDescriptionFromMethodName(methodName: string): string {
+    if (!methodName) return "";
+
+    // 常见方法名前缀映射
+    const prefixMap: { [key: string]: string } = {
+      "get": "获取",
+      "find": "查找",
+      "query": "查询",
+      "list": "列表",
+      "add": "添加",
+      "create": "创建",
+      "save": "保存",
+      "update": "更新",
+      "modify": "修改",
+      "edit": "编辑",
+      "delete": "删除",
+      "remove": "移除",
+      "batch": "批量",
+      "export": "导出",
+      "import": "导入",
+      "upload": "上传",
+      "download": "下载",
+      "check": "检查",
+      "verify": "验证",
+      "validate": "校验",
+      "send": "发送",
+      "receive": "接收",
+      "process": "处理",
+      "execute": "执行",
+      "run": "运行",
+      "start": "启动",
+      "stop": "停止",
+      "enable": "启用",
+      "disable": "禁用",
+      "login": "登录",
+      "logout": "登出",
+      "register": "注册",
+      "reset": "重置",
+    };
+
+    // 驼峰转空格分隔
+    const words = methodName.replace(/([A-Z])/g, ' $1').trim().toLowerCase().split(' ');
+    const prefix = words[0];
+    const restWords = words.slice(1);
+
+    // 如果有匹配的前缀翻译
+    if (prefixMap[prefix]) {
+      const translatedPrefix = prefixMap[prefix];
+      if (restWords.length > 0) {
+        return `${translatedPrefix}${restWords.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}`;
+      }
+      return translatedPrefix;
+    }
+
+    // 没有匹配的前缀，直接返回格式化后的方法名
+    return words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
   // 进入类声明（捕获 @RestController 和基础路径）
@@ -94,7 +173,9 @@ export class SpringControllerListener implements ParseTreeListener {
 
     if (isController) {
       this.currentClass = ctx.identifier().text;
-      this.currentClassComment = this.getComment(ctx);
+      // 优先从 @apiFolder 注释中提取，如果没有则使用普通注释
+      const apiFolder = this.getClassApiFolder(ctx);
+      this.currentClassComment = apiFolder || this.getComment(ctx);
       // 提取类级别的 @RequestMapping 路径
       const requestMapping = classAnnotations.find((annot: any) =>
         annot.text.startsWith("@RequestMapping")
@@ -172,14 +253,28 @@ export class SpringControllerListener implements ParseTreeListener {
     };
 
     // 处理集合类型（如 List<User>）
-    if (fieldType.startsWith("List<") || fieldType.startsWith("Set<")) {
+    if (fieldType.startsWith("List<") || fieldType.startsWith("Set<") || fieldType.startsWith("Collection<")) {
       const itemType = fieldType.match(/<([^>]+)>/)?.[1];
       if (itemType) {
         schema.type = "array";
         schema.items = this.parseFieldSchema(itemType, decl);
       }
     }
-    // 处理嵌套对象（如 User）
+    // 处理数组类型（如 String[], User[]）
+    else if (fieldType.endsWith("[]")) {
+      const baseType = fieldType.slice(0, -2);
+      schema.type = "array";
+      schema.items = this.parseFieldSchema(baseType, decl);
+    }
+    // 处理 Map<K, V> 类型
+    else if (fieldType.startsWith("Map<")) {
+      schema.type = "object";
+    }
+    // 判断是否为 Java 基本类型或包装类，如果是则不需要 $ref
+    else if (this.isBasicType(fieldType)) {
+      // 已经在上面设置了 type，不需要额外处理
+    }
+    // 处理嵌套对象（如 User）- 自定义类型
     else if (/^[A-Z]/.test(fieldType)) {
       if (!this.openapi.hasSchema(fieldType)) {
         const classCtx = this.classDefinitions[fieldType];
@@ -187,14 +282,9 @@ export class SpringControllerListener implements ParseTreeListener {
           this.parseClassSchema(fieldType, classCtx);
         }
       }
-      // 如果是java的基本类型不需要设置$ref
-      if (
-        !["int", "long", "float", "double", "string", "boolean", "date", "time", "timestamp", "localdatetime"].includes(
-          fieldType.toLocaleLowerCase()
-        )
-      ) {
-        schema.$ref = `#/components/schemas/${fieldType}`;
-      }
+      schema.$ref = `#/components/schemas/${fieldType}`;
+      // 删除 type，因为使用了 $ref
+      delete schema.type;
     }
     // 处理枚举类型
     else if (fieldType.endsWith("Enum")) {
@@ -204,10 +294,227 @@ export class SpringControllerListener implements ParseTreeListener {
     return schema;
   }
 
+  // 判断是否为 Java 基本类型或包装类
+  private isBasicType(type: string): boolean {
+    const basicTypes = [
+      // 基本类型
+      "int", "long", "short", "byte", "float", "double", "boolean", "char",
+      // 包装类
+      "Integer", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Character",
+      // 常用类型
+      "String", "BigDecimal", "BigInteger",
+      "LocalDateTime", "LocalDate", "LocalTime", "Date", "Timestamp", "Object"
+    ];
+    return basicTypes.includes(type);
+  }
+
   // 解析枚举值
   parseEnumValues(enumType: string) {
     // 在实际项目中，可以通过遍历 AST 查找枚举定义
     return []; // 这里简化实现
+  }
+
+  // 解析请求体的 schema（支持泛型类型）
+  private parseRequestBodySchema(paramType: string): any {
+    // 处理 List<T>、Set<T> 等集合类型
+    const collectionMatch = paramType.match(/^(List|Set|Collection)<(.+)>$/);
+    if (collectionMatch) {
+      const itemType = collectionMatch[2];
+      return {
+        type: "array",
+        items: this.parseRequestBodySchema(itemType),
+      };
+    }
+
+    // 处理 Map<K, V> 类型
+    const mapMatch = paramType.match(/^Map<(.+),\s*(.+)>$/);
+    if (mapMatch) {
+      return {
+        type: "object",
+        additionalProperties: this.parseRequestBodySchema(mapMatch[2]),
+      };
+    }
+
+    // 处理数组类型（如 String[], Long[]）
+    if (paramType.endsWith("[]")) {
+      const baseType = paramType.slice(0, -2);
+      return {
+        type: "array",
+        items: this.parseRequestBodySchema(baseType),
+      };
+    }
+
+    // 判断是否为 Java 基本类型或包装类
+    const basicTypes = [
+      "int", "Integer", "long", "Long", "float", "Float", "double", "Double",
+      "boolean", "Boolean", "String", "BigDecimal", "BigInteger",
+      "LocalDateTime", "LocalDate", "LocalTime", "Date", "Object"
+    ];
+
+    if (basicTypes.includes(paramType)) {
+      return {
+        type: this.mapJavaTypeToOpenAPI(paramType),
+      };
+    }
+
+    // 其他类型使用 $ref 引用 schema
+    return {
+      $ref: `#/components/schemas/${paramType}`,
+    };
+  }
+
+  // 解析响应类型的 schema（支持泛型包装类）
+  private parseResponseSchema(returnType: string): any {
+    // 处理 ResponseEntity<T> 包装类
+    if (returnType.startsWith("ResponseEntity<") && returnType.endsWith(">")) {
+      const innerType = returnType.slice(14, -1); // 去掉 ResponseEntity< 和 >
+      return this.parseResponseSchema(innerType);
+    }
+
+    // 处理 List<T>、Set<T> 等集合类型
+    const collectionMatch = returnType.match(/^(List|Set|Collection)<(.+)>$/);
+    if (collectionMatch) {
+      const itemType = collectionMatch[2];
+      return {
+        type: "array",
+        items: this.parseResponseSchema(itemType),
+      };
+    }
+
+    // 处理 Map<K, V> 类型
+    const mapMatch = returnType.match(/^Map<(.+),\s*(.+)>$/);
+    if (mapMatch) {
+      return {
+        type: "object",
+        additionalProperties: this.parseResponseSchema(mapMatch[2]),
+      };
+    }
+
+    // 处理数组类型（如 String[], User[]）
+    if (returnType.endsWith("[]")) {
+      const baseType = returnType.slice(0, -2);
+      return {
+        type: "array",
+        items: this.parseResponseSchema(baseType),
+      };
+    }
+
+    // 处理常见的泛型包装类（如 ApiResponse<T>, Result<T>, R<T>, AjaxResult 等）
+    const genericWrapperMatch = returnType.match(/^(ApiResponse|Result|R|AjaxResult|Response|CommonResult)<(.+)>$/);
+    if (genericWrapperMatch) {
+      const wrapperName = genericWrapperMatch[1];
+      const genericType = genericWrapperMatch[2];
+      // 生成具体的泛型 schema（如 ApiResponse_User）
+      return this.generateGenericWrapperSchema(wrapperName, genericType);
+    }
+
+    // 处理其他泛型类（如 PageResponse<User>, CustomWrapper<T> 等）
+    const genericMatch = returnType.match(/^([A-Z][a-zA-Z0-9]*)<(.+)>$/);
+    if (genericMatch) {
+      const wrapperName = genericMatch[1];
+      const genericType = genericMatch[2];
+      // 为任意泛型类生成 schema
+      return this.generateGenericWrapperSchema(wrapperName, genericType);
+    }
+
+    // 判断是否为 Java 基本类型或包装类
+    const basicTypes = [
+      "int", "Integer", "long", "Long", "float", "Float", "double", "Double",
+      "boolean", "Boolean", "String", "BigDecimal", "BigInteger",
+      "LocalDateTime", "LocalDate", "LocalTime", "Date", "Object", "void", "Void"
+    ];
+
+    if (basicTypes.includes(returnType)) {
+      return {
+        type: this.mapJavaTypeToOpenAPI(returnType),
+      };
+    }
+
+    // 其他自定义类型使用 $ref 引用 schema
+    return {
+      $ref: `#/components/schemas/${returnType}`,
+    };
+  }
+
+  // 生成泛型包装类的具体 schema（如 ApiResponse<User> -> ApiResponse_User）
+  private generateGenericWrapperSchema(wrapperName: string, genericType: string): any {
+    // 生成具体的 schema 名称
+    const specificSchemaName = `${wrapperName}_${genericType.replace(/[<>,\s]/g, '_')}`;
+
+    // 如果已经存在，直接返回引用
+    if (this.openapi.hasSchema(specificSchemaName)) {
+      return { $ref: `#/components/schemas/${specificSchemaName}` };
+    }
+
+    // 创建新的 schema
+    const schema: any = {
+      type: "object",
+      properties: {},
+      description: `${wrapperName}<${genericType}>`,
+    };
+
+    // 常见的包装类字段
+    const commonFields = this.getCommonWrapperFields(wrapperName);
+
+    // 设置每个字段
+    for (const [fieldName, fieldType] of Object.entries(commonFields)) {
+      if (fieldType === 'T' || fieldType === 'DATA') {
+        // 泛型字段，使用实际类型
+        schema.properties[fieldName] = this.parseResponseSchema(genericType);
+      } else if (typeof fieldType === 'string') {
+        schema.properties[fieldName] = { type: fieldType };
+      }
+    }
+
+    // 注册 schema
+    this.openapi.addSchema(specificSchemaName, schema);
+
+    return { $ref: `#/components/schemas/${specificSchemaName}` };
+  }
+
+  // 获取常见包装类的字段定义
+  private getCommonWrapperFields(wrapperName: string): { [key: string]: any } {
+    // 常见的响应包装类字段映射
+    const wrapperFieldsMap: { [key: string]: { [key: string]: any } } = {
+      'ApiResponse': {
+        'code': 'integer',
+        'message': 'string',
+        'msg': 'string',
+        'data': 'T',
+      },
+      'Result': {
+        'code': 'integer',
+        'message': 'string',
+        'msg': 'string',
+        'data': 'T',
+      },
+      'R': {
+        'code': 'integer',
+        'message': 'string',
+        'msg': 'string',
+        'data': 'T',
+      },
+      'Response': {
+        'code': 'integer',
+        'message': 'string',
+        'msg': 'string',
+        'data': 'T',
+      },
+      'AjaxResult': {
+        'code': 'integer',
+        'message': 'string',
+        'msg': 'string',
+        'data': 'T',
+      },
+      'CommonResult': {
+        'code': 'integer',
+        'message': 'string',
+        'msg': 'string',
+        'data': 'T',
+      },
+    };
+
+    return wrapperFieldsMap[wrapperName] || { 'data': 'T' };
   }
 
   // 进入方法声明（捕获 @GetMapping/@PostMapping 等）
@@ -262,9 +569,15 @@ export class SpringControllerListener implements ParseTreeListener {
 
     // 获取方法注释
     const methodComment = this.getComment(ctx);
+    const methodName = ctx.identifier()?.text || "";
     if (methodComment) {
       this.currentMethod.operation.description = methodComment;
       this.currentMethod.operation.summary = methodComment;
+    } else {
+      // 如果没有注释，使用方法名生成描述
+      const generatedDesc = this.generateDescriptionFromMethodName(methodName);
+      this.currentMethod.operation.description = generatedDesc;
+      this.currentMethod.operation.summary = generatedDesc;
     }
 
     // 提取方法参数
@@ -283,13 +596,11 @@ export class SpringControllerListener implements ParseTreeListener {
           paramLocation = "path";
         } else if (paramAnnotations?.some((a) => a.includes("RequestBody"))) {
           paramLocation = "body";
-          // 修改：使用 $ref 引用已定义的 schema
+          // 处理 @RequestBody 的 schema
           this.currentMethod.operation.requestBody = {
             content: {
               "application/json": {
-                schema: {
-                  $ref: `#/components/schemas/${paramType}`,
-                },
+                schema: this.parseRequestBodySchema(paramType),
               },
             },
           };
@@ -305,31 +616,14 @@ export class SpringControllerListener implements ParseTreeListener {
     }
 
     // 提取返回类型 - 修改为使用 $ref
-    let returnType = ctx.typeTypeOrVoid().text;
+    const returnType = ctx.typeTypeOrVoid().text;
     if (returnType !== "void" && returnType !== "Void") {
-      if(returnType.includes("ResponseEntity<")){
-        returnType = returnType.replace("ResponseEntity<", "").replace(">", "")
-      }
-      // list类型处理
-      if(returnType.includes("List<")){
-        const itemType = returnType.match(/List<([^>]+)>/)?.[1];
+      const responseSchema = this.parseResponseSchema(returnType);
+      if (responseSchema) {
         this.currentMethod.operation.responses["200"].content = {
           "application/json": {
-            schema: {
-              type: "array",
-              items: {
-                $ref: `#/components/schemas/${itemType}`
-              }
-            }
-          }
-        };
-      } else {
-        this.currentMethod.operation.responses["200"].content = {
-          "application/json": {
-            schema: {
-              $ref: `#/components/schemas/${returnType}`
-            }
-          }
+            schema: responseSchema,
+          },
         };
       }
     }
@@ -342,19 +636,29 @@ export class SpringControllerListener implements ParseTreeListener {
       Integer: "integer",
       long: "integer",
       Long: "integer",
+      short: "integer",
+      Short: "integer",
+      byte: "integer",
+      Byte: "integer",
       float: "number",
       Float: "number",
       double: "number",
       Double: "number",
+      BigDecimal: "number",
+      BigInteger: "integer",
       String: "string",
       boolean: "boolean",
       Boolean: "boolean",
       List: "array",
+      Set: "array",
+      Collection: "array",
       Map: "object",
+      Object: "object",
       LocalDateTime: "string",
       LocalDate: "string",
       LocalTime: "string",
-      Date: "string"
+      Date: "string",
+      Timestamp: "string",
     };
     return typeMap[javaType] || "object";
   }

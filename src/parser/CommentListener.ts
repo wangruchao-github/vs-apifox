@@ -16,105 +16,114 @@ export class CommentListener implements ParseTreeListener {
     enterMethodDeclaration(ctx: MethodDeclarationContext) {
       const startTokenIndex = ctx.start.tokenIndex;
       const comments = this.getLeadingComments(startTokenIndex);
-      const processedComments = this.processComments(comments);
-      
+      // 选择最佳注释（优先 Javadoc）
+      const bestComment = this.selectBestComment(comments);
+      const processedComments = bestComment ? this.processComment(bestComment) : [];
+
       // 使用方法签名作为 key
       const methodKey = ctx.text;
       this.controllerListener.comments.set(methodKey, processedComments);
-  
-      // if (comments.length > 0) {
-      //   console.log("\n方法注释:", {
-      //     key: methodKey,
-      //     comments: processedComments
-      //   });
-      // }
     }
-  
-    getLeadingComments(tokenIndex: number) {
-      const comments = [];
-      // console.log('getLeadingComments', tokenIndex);
-      
+
+    // 获取紧邻的注释（从近到远）
+    getLeadingComments(tokenIndex: number): string[] {
+      const comments: string[] = [];
       let index = tokenIndex - 1;
-      let foundComment = false;
-      let skipNewlines = 0;
-      
+
       while (index >= 0) {
         const token = this.tokens[index];
-        
-        // console.log(`Token at ${index}:`, {
-        //   text: token.text,
-        //   type: token.type,
-        //   typeName: this.getTokenTypeName(token.type),
-        //   channel: token.channel
-        // });
 
         // 如果是注释，收集它
-        if (token.type === JavaLexer.COMMENT || 
+        if (token.type === JavaLexer.COMMENT ||
             token.type === JavaLexer.LINE_COMMENT) {
-          comments.unshift(token.text);
-          foundComment = true;
-          skipNewlines = 0;
+          comments.push(token.text);  // 添加到末尾（近的在前）
         }
-        // 处理空白字符和修饰符
-        else if (token.text.trim() === '' || 
-                 token.channel === Lexer.HIDDEN ||
-                 this.isModifier(token.type)) {  // 添加对修饰符的处理
-          if (token.text.includes('\n')) {
-            skipNewlines++;
-            if (foundComment && skipNewlines > 10) {
-              console.log('skipNewlines', skipNewlines);
-              break;
-            }
-          }
-        }
-        // 如果遇到了其他非修饰符token
-        else if (foundComment 
-          // || (token.channel === Lexer.DEFAULT_TOKEN_CHANNEL && !this.isModifier(token.type))
-              ) {
-          console.log('foundComment', foundComment);
+        // 遇到 } 或 ; 表示到了上一个方法/语句的结束，停止
+        else if (token.text === '}' || token.text === ';') {
           break;
         }
-        
+        // 其他 token（空白、换行、注解、修饰符等）继续向前查找
+        // 但如果已经收集了注释，且遇到非空白/换行/注解/修饰符的 token，也停止
+        else if (comments.length > 0 && !this.isSkippableToken(token)) {
+          break;
+        }
+
         index--;
       }
 
       return comments;
     }
-    
-    processComments(comments: string[]): string[] {
-      return comments
-        .map(comment => {
-          // 移除注释标记和空白
-          let processed = comment
-            .replace(/\/\*\*|\*\/|\*/g, '')  // 移除注释标记
-            .split('\n')                      // 按行分割
-            .map(line => line.trim())         // 清理每行的空白
-            .filter(line => line.length > 0)  // 移除空行
-            [0];                      // 重新组合
-          
-          console.log('Processed comment:', {
-            original: comment,
-            processed: processed
-          });
-          
-          return processed;
-        })
-        .filter(comment => comment.length > 0);
+
+    // 判断是否为可跳过的 token（空白、换行、注解、修饰符）
+    private isSkippableToken(token: any): boolean {
+      // 空白
+      if (token.text.trim() === '') return true;
+      // HIDDEN channel
+      if (token.channel === Lexer.HIDDEN) return true;
+      // 修饰符
+      if (this.isModifier(token.type)) return true;
+      // 注解（以 @ 开头）
+      if (token.text.startsWith('@')) return true;
+
+      return false;
     }
-    
-    // 辅助方法：获取token类型名称
-    private getTokenTypeName(type: number): string {
-      switch (type) {
-        case JavaLexer.COMMENT: return 'COMMENT';
-        case JavaLexer.LINE_COMMENT: return 'LINE_COMMENT';
-        // 可以添加其他类型...
-        default: return `TYPE_${type}`;
+
+    // 处理单个注释
+    private processComment(comment: string): string[] {
+      // 移除注释标记
+      let processed = comment
+        .replace(/\/\*\*|\*\/|\*/g, '')  // 移除 Javadoc 标记
+        .replace(/\/\//g, '')             // 移除单行注释标记
+        .split('\n')                      // 按行分割
+        .map(line => line.trim())         // 清理每行空白
+        .filter(line => line.length > 0)  // 移除空行
+        .join(' ');                       // 合并为一行
+
+      return processed ? [processed] : [];
+    }
+
+    // 判断是否为分隔线注释
+    private isDividerComment(comment: string): boolean {
+      const content = comment
+        .replace(/\/\*\*|\*\/|\*/g, '')
+        .replace(/\/\//g, '')
+        .trim();
+
+      // 分隔线注释特征：主要由 =、-、*、# 等字符组成
+      const dividerPattern = /^[=\-*#\s]+$/;
+      return dividerPattern.test(content);
+    }
+
+    // 判断是否为 Javadoc 注释
+    private isJavadocComment(comment: string): boolean {
+      return comment.trim().startsWith('/**');
+    }
+
+    // 选择最佳注释：优先 Javadoc，其次非分隔线注释
+    private selectBestComment(comments: string[]): string | null {
+      if (comments.length === 0) return null;
+
+      // 遍历注释（从近到远）
+      for (const comment of comments) {
+        // 优先选择 Javadoc
+        if (this.isJavadocComment(comment)) {
+          return comment;
+        }
       }
+
+      // 没有 Javadoc，找第一个非分隔线注释
+      for (const comment of comments) {
+        if (!this.isDividerComment(comment)) {
+          return comment;
+        }
+      }
+
+      // 都是分隔线注释，返回 null
+      return null;
     }
-    
-    // 添加新的辅助方法来判断是否为修饰符
+
+    // 判断是否为修饰符
     private isModifier(type: number): boolean {
-      // 添加所有Java修饰符的类型判断
       return [
         JavaLexer.PUBLIC,
         JavaLexer.PRIVATE,
@@ -122,34 +131,38 @@ export class CommentListener implements ParseTreeListener {
         JavaLexer.STATIC,
         JavaLexer.FINAL,
         JavaLexer.ABSTRACT,
-        // 可以根据需要添加其他修饰符
+        JavaLexer.SYNCHRONIZED,
+        JavaLexer.VOLATILE,
+        JavaLexer.TRANSIENT,
+        JavaLexer.NATIVE,
+        JavaLexer.STRICTFP,
       ].includes(type);
     }
-    
+
     // 实现 ParseTreeListener 接口所需的其他方法
     enterEveryRule(ctx: any): void {}
     exitEveryRule(ctx: any): void {}
     visitTerminal(node: any): void {}
     visitErrorNode(node: any): void {}
 
-    // 添加处理类声明的方法
+    // 处理类声明
     enterClassDeclaration(ctx: any) {
       const startTokenIndex = ctx.start.tokenIndex;
       const comments = this.getLeadingComments(startTokenIndex);
-      const processedComments = this.processComments(comments);
-      
-      // 使用类名作为 key
+      const bestComment = this.selectBestComment(comments);
+      const processedComments = bestComment ? this.processComment(bestComment) : [];
+
       const classKey = ctx.text;
       this.controllerListener.comments.set(classKey, processedComments);
     }
 
-    // 添加处理字段声明的方法
+    // 处理字段声明
     enterFieldDeclaration(ctx: any) {
       const startTokenIndex = ctx.start.tokenIndex;
       const comments = this.getLeadingComments(startTokenIndex);
-      const processedComments = this.processComments(comments);
-      
-      // 使用字段声明作为 key
+      const bestComment = this.selectBestComment(comments);
+      const processedComments = bestComment ? this.processComment(bestComment) : [];
+
       const fieldKey = ctx.text;
       this.controllerListener.comments.set(fieldKey, processedComments);
     }
