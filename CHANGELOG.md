@@ -2,6 +2,22 @@
 
 所有重要的更改都将记录在此文件中。
 
+## [3.0.2] - 2026-03-17
+
+### 新增功能
+
+- **支持 Swagger 2 (springfox) 注解解析**：优先提取注解中的描述信息
+  - `@Api`：类级别，提取 tags 作为 API 分组，description 作为描述
+  - `@ApiOperation`：方法级别，提取 value 作为 summary，notes 作为 description，支持 response 和 responseContainer
+  - `@ApiParam`：参数级别，提取 name、value、required、example
+  - `@ApiModel`：模型类级别，提取 description
+  - `@ApiModelProperty`：字段级别，提取 value、required、example、allowableValues、hidden
+
+### 修复问题
+
+- **实体字段描述识别**：修复字段描述错误取到类注释的问题，现正确从 `@ApiModelProperty` 注解提取
+- **字段属性扩展**：支持 `allowableValues` 解析为 range 或 enum，支持 `hidden` 跳过隐藏字段
+
 ## [3.0.0] - 2026-03-16
 
 ### 新增功能

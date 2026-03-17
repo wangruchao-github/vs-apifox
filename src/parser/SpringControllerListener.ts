@@ -173,9 +173,26 @@ export class SpringControllerListener implements ParseTreeListener {
 
     if (isController) {
       this.currentClass = ctx.identifier().text;
-      // 优先从 @apiFolder 注释中提取，如果没有则使用普通注释
-      const apiFolder = this.getClassApiFolder(ctx);
-      this.currentClassComment = apiFolder || this.getComment(ctx);
+
+      // 解析 @Api 注解（Swagger 2）
+      const apiAnnotation = this.extractApiAnnotation(classAnnotations);
+      if (apiAnnotation) {
+        // 优先使用 @Api 注解中的 tags 作为 apifoxFolder
+        if (apiAnnotation.tags) {
+          this.currentClassComment = apiAnnotation.tags;
+        } else if (apiAnnotation.description) {
+          this.currentClassComment = apiAnnotation.description;
+        } else {
+          // 如果 @Api 没有有效属性，回退到注释
+          const apiFolder = this.getClassApiFolder(ctx);
+          this.currentClassComment = apiFolder || this.getComment(ctx);
+        }
+      } else {
+        // 没有 @Api 注解，从注释中提取
+        const apiFolder = this.getClassApiFolder(ctx);
+        this.currentClassComment = apiFolder || this.getComment(ctx);
+      }
+
       // 提取类级别的 @RequestMapping 路径
       const requestMapping = classAnnotations.find((annot: any) =>
         annot.text.startsWith("@RequestMapping")
@@ -204,10 +221,25 @@ export class SpringControllerListener implements ParseTreeListener {
       description: "",
     };
 
-    // 获取类注释
-    const classComment = this.getComment(ctx);
-    if (classComment) {
-      schema.description = classComment;
+    // 获取类级别的注解
+    const classAnnotations =
+      ctx.parent?.children
+        ?.filter(
+          (child) =>
+            child.constructor.name === "ClassOrInterfaceModifierContext"
+        )
+        .flat() || [];
+
+    // 解析 @ApiModel 注解（Swagger 2）
+    const apiModel = this.extractApiModelAnnotation(classAnnotations);
+    if (apiModel && apiModel.description) {
+      schema.description = apiModel.description;
+    } else {
+      // 没有 @ApiModel 注解，使用类注释
+      const classComment = this.getComment(ctx);
+      if (classComment) {
+        schema.description = classComment;
+      }
     }
 
     // 遍历类体，提取字段
@@ -224,14 +256,51 @@ export class SpringControllerListener implements ParseTreeListener {
             .variableDeclaratorId()
             .identifier().text;
 
-          // 获取字段注释
-          const fieldComment = this.findParamComment(fieldDecl, fieldName);
+          // 解析字段 schema
+          const fieldSchema = this.parseFieldSchema(fieldType, fieldDecl);
 
-          // schema.properties[fieldName] = {
-          //   type: this.mapJavaTypeToOpenAPI(fieldType),
-          //   description: fieldComment ? fieldComment.trim() : "",
-          // };
-          schema.properties[fieldName] = this.parseFieldSchema(fieldType, fieldDecl);
+          // 解析 @ApiModelProperty 注解（Swagger 2）
+          const apiModelPropertyText = this.findApiModelProperty(decl);
+          if (apiModelPropertyText) {
+            const apiModelProperty = this.extractApiModelPropertyAnnotation(apiModelPropertyText);
+            if (apiModelProperty) {
+              // 跳过 hidden 字段
+              if (apiModelProperty.hidden) {
+                return;
+              }
+
+              // 使用注解值覆盖
+              if (apiModelProperty.value) {
+                fieldSchema.description = apiModelProperty.value;
+              }
+              if (apiModelProperty.required !== undefined) {
+                // OpenAPI 3.0 中 required 是在 schema 级别定义的
+                fieldSchema.required = apiModelProperty.required;
+              }
+              if (apiModelProperty.example) {
+                fieldSchema.example = apiModelProperty.example;
+              }
+              if (apiModelProperty.allowableValues) {
+                // 解析 allowableValues，如 "range[2,50]" 或 "1,2,3"
+                const rangeMatch = apiModelProperty.allowableValues.match(/range\[(\d+),(\d+)\]/);
+                if (rangeMatch) {
+                  fieldSchema.minimum = parseInt(rangeMatch[1]);
+                  fieldSchema.maximum = parseInt(rangeMatch[2]);
+                } else {
+                  // 枚举值，如 "1,2,3"
+                  fieldSchema.enum = apiModelProperty.allowableValues.split(',').map(v => v.trim());
+                }
+              }
+            }
+          } else {
+            // 没有 @ApiModelProperty 注解，使用字段注释
+            const fieldComment = this.findParamComment(fieldDecl, fieldName);
+            if (fieldComment) {
+              fieldSchema.description = fieldComment.trim();
+            }
+          }
+
+          schema.properties[fieldName] = fieldSchema;
         }
       });
 
@@ -247,9 +316,13 @@ export class SpringControllerListener implements ParseTreeListener {
       items?: any;
       $ref?: string;
       enum?: any[];
+      required?: boolean;
+      example?: string;
+      minimum?: number;
+      maximum?: number;
     } = {
       type: this.mapJavaTypeToOpenAPI(fieldType),
-      description: this.findParamComment(decl, fieldType),
+      // description 将在 parseClassSchema 中根据 @ApiModelProperty 设置
     };
 
     // 处理集合类型（如 List<User>）
@@ -567,14 +640,43 @@ export class SpringControllerListener implements ParseTreeListener {
       },
     };
 
+    // 解析 @ApiOperation 注解（Swagger 2）
+    const apiOperation = this.extractApiOperationAnnotation(methodAnnotations);
+
     // 获取方法注释
     const methodComment = this.getComment(ctx);
     const methodName = ctx.identifier()?.text || "";
-    if (methodComment) {
+
+    // 优先使用 @ApiOperation 注解，其次使用注释
+    if (apiOperation) {
+      // value 用作 summary
+      this.currentMethod.operation.summary = apiOperation.value || "";
+      // notes 用作 description
+      this.currentMethod.operation.description = apiOperation.notes || apiOperation.value || "";
+
+      // 如果有 response 属性，覆盖返回类型
+      if (apiOperation.response) {
+        let responseSchema: any;
+        if (apiOperation.responseContainer === 'List') {
+          responseSchema = {
+            type: "array",
+            items: { $ref: `#/components/schemas/${apiOperation.response}` }
+          };
+        } else {
+          responseSchema = { $ref: `#/components/schemas/${apiOperation.response}` };
+        }
+        this.currentMethod.operation.responses["200"].content = {
+          "application/json": {
+            schema: responseSchema,
+          },
+        };
+      }
+    } else if (methodComment) {
+      // 没有 @ApiOperation 注解，使用注释
       this.currentMethod.operation.description = methodComment;
       this.currentMethod.operation.summary = methodComment;
     } else {
-      // 如果没有注释，使用方法名生成描述
+      // 如果没有注释和注解，使用方法名生成描述
       const generatedDesc = this.generateDescriptionFromMethodName(methodName);
       this.currentMethod.operation.description = generatedDesc;
       this.currentMethod.operation.summary = generatedDesc;
@@ -606,12 +708,36 @@ export class SpringControllerListener implements ParseTreeListener {
           };
         }
 
-        this.currentMethod.operation.parameters.push({
+        // 解析 @ApiParam 注解（Swagger 2）
+        const apiParamAnnotation = paramAnnotations?.find((a) => a.startsWith("@ApiParam("));
+        let paramDescription = "";
+        let paramRequired = false;
+        let paramExample: string | undefined;
+
+        if (apiParamAnnotation) {
+          const apiParam = this.extractApiParamAnnotation(apiParamAnnotation);
+          if (apiParam) {
+            paramDescription = apiParam.value || "";
+            paramRequired = apiParam.required || false;
+            paramExample = apiParam.example;
+          }
+        }
+
+        // 构建参数对象
+        const paramObj: any = {
           name: paramName,
           in: paramLocation,
           schema: { type: this.mapJavaTypeToOpenAPI(paramType) },
-          description: "", // 从注释中提取描述
-        });
+          description: paramDescription,
+          required: paramRequired || paramLocation === "path",
+        };
+
+        // 添加 example
+        if (paramExample) {
+          paramObj.example = paramExample;
+        }
+
+        this.currentMethod.operation.parameters.push(paramObj);
       });
     }
 
@@ -674,6 +800,196 @@ export class SpringControllerListener implements ParseTreeListener {
     if (pathMatch) return pathMatch[1];
 
     return "";
+  }
+
+  // ============ Swagger 2 注解解析方法 ============
+
+  /**
+   * 解析 @Api 注解（类级别）
+   * @example @Api(tags = "user", description = "用户管理接口")
+   */
+  private extractApiAnnotation(annotations: any[]): { tags?: string; description?: string } | null {
+    const apiAnnotation = annotations.find((annot: any) =>
+      annot.text.startsWith("@Api(")
+    );
+    if (!apiAnnotation) return null;
+
+    const text = apiAnnotation.text;
+    const result: { tags?: string; description?: string } = {};
+
+    // 提取 tags 属性
+    const tagsMatch = text.match(/tags\s*=\s*"([^"]+)"/);
+    if (tagsMatch) {
+      result.tags = tagsMatch[1];
+    }
+
+    // 提取 description 属性
+    const descMatch = text.match(/description\s*=\s*"([^"]+)"/);
+    if (descMatch) {
+      result.description = descMatch[1];
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 解析 @ApiOperation 注解（方法级别）
+   * @example @ApiOperation(value = "获取用户列表", notes = "详细说明", response = User.class)
+   */
+  private extractApiOperationAnnotation(annotations: any[]): { value?: string; notes?: string; response?: string; responseContainer?: string } | null {
+    const apiOpAnnotation = annotations.find((annot: any) =>
+      annot.text.startsWith("@ApiOperation(")
+    );
+    if (!apiOpAnnotation) return null;
+
+    const text = apiOpAnnotation.text;
+    const result: { value?: string; notes?: string; response?: string; responseContainer?: string } = {};
+
+    // 提取 value 属性（用作 summary）
+    const valueMatch = text.match(/value\s*=\s*"([^"]+)"/);
+    if (valueMatch) {
+      result.value = valueMatch[1];
+    }
+
+    // 提取 notes 属性（用作 description）
+    const notesMatch = text.match(/notes\s*=\s*"([^"]+)"/);
+    if (notesMatch) {
+      result.notes = notesMatch[1];
+    }
+
+    // 提取 response 属性
+    const responseMatch = text.match(/response\s*=\s*([A-Za-z0-9_]+)\.class/);
+    if (responseMatch) {
+      result.response = responseMatch[1];
+    }
+
+    // 提取 responseContainer 属性
+    const containerMatch = text.match(/responseContainer\s*=\s*"([^"]+)"/);
+    if (containerMatch) {
+      result.responseContainer = containerMatch[1];
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 解析 @ApiParam 注解（参数级别）
+   * @example @ApiParam(name = "id", value = "用户ID", required = true, example = "1")
+   */
+  private extractApiParamAnnotation(annotationText: string): { name?: string; value?: string; required?: boolean; example?: string } | null {
+    if (!annotationText.startsWith("@ApiParam(")) return null;
+
+    const result: { name?: string; value?: string; required?: boolean; example?: string } = {};
+
+    // 提取 name 属性
+    const nameMatch = annotationText.match(/name\s*=\s*"([^"]+)"/);
+    if (nameMatch) {
+      result.name = nameMatch[1];
+    }
+
+    // 提取 value 属性（用作 description）
+    const valueMatch = annotationText.match(/value\s*=\s*"([^"]+)"/);
+    if (valueMatch) {
+      result.value = valueMatch[1];
+    }
+
+    // 提取 required 属性
+    const requiredMatch = annotationText.match(/required\s*=\s*(true|false)/);
+    if (requiredMatch) {
+      result.required = requiredMatch[1] === 'true';
+    }
+
+    // 提取 example 属性
+    const exampleMatch = annotationText.match(/example\s*=\s*"([^"]+)"/);
+    if (exampleMatch) {
+      result.example = exampleMatch[1];
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 解析 @ApiModel 注解（模型类级别）
+   * @example @ApiModel(description = "创建用户请求")
+   */
+  private extractApiModelAnnotation(annotations: any[]): { description?: string } | null {
+    const apiModelAnnotation = annotations.find((annot: any) =>
+      annot.text.startsWith("@ApiModel(")
+    );
+    if (!apiModelAnnotation) return null;
+
+    const text = apiModelAnnotation.text;
+    const result: { description?: string } = {};
+
+    // 提取 description 属性
+    const descMatch = text.match(/description\s*=\s*"([^"]+)"/);
+    if (descMatch) {
+      result.description = descMatch[1];
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 解析 @ApiModelProperty 注解（字段级别）
+   * @example @ApiModelProperty(value = "用户名", required = true, example = "zhangsan", allowableValues = "range[2,50]")
+   */
+  private extractApiModelPropertyAnnotation(annotationText: string): { value?: string; required?: boolean; example?: string; allowableValues?: string; hidden?: boolean } | null {
+    if (!annotationText.includes("@ApiModelProperty")) return null;
+
+    const result: { value?: string; required?: boolean; example?: string; allowableValues?: string; hidden?: boolean } = {};
+
+    // 提取 value 属性（用作 description）
+    const valueMatch = annotationText.match(/value\s*=\s*"([^"]+)"/);
+    if (valueMatch) {
+      result.value = valueMatch[1];
+    }
+
+    // 提取 required 属性
+    const requiredMatch = annotationText.match(/required\s*=\s*(true|false)/);
+    if (requiredMatch) {
+      result.required = requiredMatch[1] === 'true';
+    }
+
+    // 提取 example 属性
+    const exampleMatch = annotationText.match(/example\s*=\s*"([^"]+)"/);
+    if (exampleMatch) {
+      result.example = exampleMatch[1];
+    }
+
+    // 提取 allowableValues 属性
+    const allowableMatch = annotationText.match(/allowableValues\s*=\s*"([^"]+)"/);
+    if (allowableMatch) {
+      result.allowableValues = allowableMatch[1];
+    }
+
+    // 提取 hidden 属性
+    const hiddenMatch = annotationText.match(/hidden\s*=\s*(true|false)/);
+    if (hiddenMatch) {
+      result.hidden = hiddenMatch[1] === 'true';
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 从字段声明的修饰符中查找 @ApiModelProperty 注解
+   */
+  private findApiModelProperty(decl: any): string | null {
+    // decl 是 ClassBodyDeclarationContext，使用 modifier() 方法获取修饰符
+    const modifiers = decl.modifier?.() || [];
+
+    for (const mod of modifiers) {
+      const classOrInterfaceMod = mod.classOrInterfaceModifier?.();
+      if (classOrInterfaceMod) {
+        const annot = classOrInterfaceMod.annotation?.();
+        if (annot && annot.text && annot.text.includes("@ApiModelProperty")) {
+          return annot.text;
+        }
+      }
+    }
+
+    return null;
   }
 
   // 提取 HTTP 方法（如 @GetMapping → get）
