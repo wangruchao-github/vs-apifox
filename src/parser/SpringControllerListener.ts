@@ -135,6 +135,8 @@ export class SpringControllerListener implements ParseTreeListener {
   // 进入类声明（捕获 @RestController 和基础路径）
   enterClassDeclaration(ctx: ClassDeclarationContext) {
     const className = ctx.identifier().text;
+    this.classDefinitions[className] = ctx;
+
     // 直接从类声明获取修饰符
     const classAnnotations =
       ctx.parent?.children
@@ -149,11 +151,9 @@ export class SpringControllerListener implements ParseTreeListener {
       annotations: classAnnotations.map((a: any) => a.text),
     });
 
-    // 检查是否是 Spring 控制器
+    // 检查是否是 Spring / JAX-RS 控制器
     const isController = classAnnotations.some(
-      (annot: any) =>
-        annot.text.includes("RestController") ||
-        annot.text.includes("Controller")
+      (annot: any) => this.isControllerAnnotation(annot.text)
     );
 
     // 检查是否是 Spring 控制器
@@ -193,16 +193,16 @@ export class SpringControllerListener implements ParseTreeListener {
         this.currentClassComment = apiFolder || this.getComment(ctx);
       }
 
-      // 提取类级别的 @RequestMapping 路径
-      const requestMapping = classAnnotations.find((annot: any) =>
-        annot.text.startsWith("@RequestMapping")
-      );
-      if (requestMapping) {
-        this.basePath = this.extractAnnotationValue(requestMapping.text);
-      }
+      this.basePath = this.extractBasePath(classAnnotations);
     } else if (isService || isRepository) {
+      this.currentClass = null;
+      this.currentClassComment = null;
+      this.basePath = "";
       // 如果是服务类或者仓储类，则不解析其字段作为 schema
     } else {
+      this.currentClass = null;
+      this.currentClassComment = null;
+      this.basePath = "";
       // 如果是普通类，解析其字段作为 schema
       this.parseClassSchema(className, ctx);
     }
@@ -590,6 +590,202 @@ export class SpringControllerListener implements ParseTreeListener {
     return wrapperFieldsMap[wrapperName] || { 'data': 'T' };
   }
 
+  private isControllerAnnotation(annotationText: string): boolean {
+    return (
+      annotationText.includes("RestController") ||
+      annotationText.includes("Controller") ||
+      annotationText.startsWith("@Path")
+    );
+  }
+
+  private getMethodAnnotations(ctx: MethodDeclarationContext): any[] {
+    return (
+      ctx.parent?.parent?.children
+        ?.filter((child) => child.constructor.name === "ModifierContext")
+        .map((mod: any) => mod.classOrInterfaceModifier?.()?.annotation?.())
+        .filter(Boolean)
+        .flat() || []
+    );
+  }
+
+  private isHttpMethodAnnotation(annotationText: string): boolean {
+    return [
+      "@GetMapping",
+      "@PostMapping",
+      "@PutMapping",
+      "@DeleteMapping",
+      "@RequestMapping",
+      "@GET",
+      "@POST",
+      "@PUT",
+      "@DELETE",
+    ].some((prefix) => annotationText.startsWith(prefix));
+  }
+
+  private isJaxRsHttpMethodAnnotation(annotationText: string): boolean {
+    return ["@GET", "@POST", "@PUT", "@DELETE"].some((prefix) =>
+      annotationText.startsWith(prefix)
+    );
+  }
+
+  private extractBasePath(annotations: any[]): string {
+    const pathAnnotation = annotations.find(
+      (annot: any) =>
+        annot.text.startsWith("@RequestMapping") || annot.text.startsWith("@Path")
+    );
+
+    return pathAnnotation ? this.extractAnnotationValue(pathAnnotation.text) : "";
+  }
+
+  private extractMethodPath(annotations: any[]): string {
+    const pathAnnotation = annotations.find((annot: any) =>
+      annot.text.startsWith("@Path")
+    );
+    if (pathAnnotation) {
+      return this.extractAnnotationValue(pathAnnotation.text);
+    }
+
+    const springMappingAnnotation = annotations.find((annot: any) =>
+      [
+        "@GetMapping",
+        "@PostMapping",
+        "@PutMapping",
+        "@DeleteMapping",
+        "@RequestMapping",
+      ].some((prefix) => annot.text.startsWith(prefix))
+    );
+
+    return springMappingAnnotation
+      ? this.extractAnnotationValue(springMappingAnnotation.text)
+      : "";
+  }
+
+  private joinPaths(basePath: string, methodPath: string): string {
+    const parts = [basePath, methodPath]
+      .filter((part) => part && part !== "/")
+      .map((part) => part.replace(/^\/+|\/+$/g, ""))
+      .filter(Boolean);
+
+    if (parts.length === 0) {
+      return "/";
+    }
+
+    return `/${parts.join("/")}`;
+  }
+
+  private extractAnnotationArgument(annotationText: string, fallbackName: string): string {
+    const namedMatch = annotationText.match(/(?:value|name)\s*=\s*"([^"]+)"/);
+    if (namedMatch) {
+      return namedMatch[1];
+    }
+
+    const directMatch = annotationText.match(/@[^(]+\(\s*"([^"]+)"/);
+    if (directMatch) {
+      return directMatch[1];
+    }
+
+    return fallbackName;
+  }
+
+  private isComplexType(typeName: string): boolean {
+    if (this.isBasicType(typeName)) {
+      return false;
+    }
+
+    if (typeName.endsWith("[]")) {
+      return true;
+    }
+
+    if (/^(List|Set|Collection|Map)<.+>$/.test(typeName)) {
+      return true;
+    }
+
+    return /^[A-Z]/.test(typeName);
+  }
+
+  private parseParameterSchema(paramType: string): any {
+    if (
+      paramType.endsWith("[]") ||
+      /^(List|Set|Collection|Map)<.+>$/.test(paramType)
+    ) {
+      return this.parseRequestBodySchema(paramType);
+    }
+
+    if (this.isBasicType(paramType)) {
+      return { type: this.mapJavaTypeToOpenAPI(paramType) };
+    }
+
+    return { $ref: `#/components/schemas/${paramType}` };
+  }
+
+  private setRequestBody(paramType: string) {
+    this.currentMethod.operation.requestBody = {
+      content: {
+        "application/json": {
+          schema: this.parseRequestBodySchema(paramType),
+        },
+      },
+    };
+  }
+
+  private resolveParameterLocation(
+    paramAnnotations: string[],
+    paramType: string,
+    paramName: string,
+    isJaxRsMethod: boolean
+  ): { name: string; location: string; required: boolean; isRequestBody: boolean } {
+    const pathAnnotation = paramAnnotations.find(
+      (annotation) =>
+        annotation.startsWith("@PathVariable") || annotation.startsWith("@PathParam")
+    );
+    if (pathAnnotation) {
+      return {
+        name: this.extractAnnotationArgument(pathAnnotation, paramName),
+        location: "path",
+        required: true,
+        isRequestBody: false,
+      };
+    }
+
+    const queryAnnotation = paramAnnotations.find(
+      (annotation) =>
+        annotation.startsWith("@QueryParam") || annotation.startsWith("@RequestParam")
+    );
+    if (queryAnnotation) {
+      return {
+        name: this.extractAnnotationArgument(queryAnnotation, paramName),
+        location: "query",
+        required: false,
+        isRequestBody: false,
+      };
+    }
+
+    if (paramAnnotations.some((annotation) => annotation.startsWith("@RequestBody"))) {
+      return {
+        name: paramName,
+        location: "body",
+        required: true,
+        isRequestBody: true,
+      };
+    }
+
+    if (isJaxRsMethod && this.isComplexType(paramType)) {
+      return {
+        name: paramName,
+        location: "body",
+        required: true,
+        isRequestBody: true,
+      };
+    }
+
+    return {
+      name: paramName,
+      location: "query",
+      required: false,
+      isRequestBody: false,
+    };
+  }
+
   // 进入方法声明（捕获 @GetMapping/@PostMapping 等）
   enterMethodDeclaration(ctx: MethodDeclarationContext) {
     console.debug("Entering method declaration", {
@@ -598,22 +794,10 @@ export class SpringControllerListener implements ParseTreeListener {
     });
     if (!this.currentClass) return;
 
-    // 修复 modifier 访问方式
-    const methodAnnotations =
-      ctx.parent?.parent?.children
-        ?.filter((child) => child.constructor.name === "ModifierContext")
-        .map((mod: any) => mod.classOrInterfaceModifier()?.annotation())
-        .filter(Boolean)
-        .flat() || [];
+    const methodAnnotations = this.getMethodAnnotations(ctx);
 
     const httpMethodAnnotation = methodAnnotations.find((annot: any) =>
-      [
-        "GetMapping",
-        "PostMapping",
-        "PutMapping",
-        "DeleteMapping",
-        "RequestMapping",
-      ].some((name) => annot.text.startsWith(`@${name}`))
+      this.isHttpMethodAnnotation(annot.text)
     );
 
     if (!httpMethodAnnotation) {
@@ -623,7 +807,8 @@ export class SpringControllerListener implements ParseTreeListener {
     // 解析 HTTP 方法和路径
     const annotationText = httpMethodAnnotation.text;
     const httpMethod = this.extractHttpMethod(annotationText);
-    const path = this.basePath + this.extractAnnotationValue(annotationText);
+    const path = this.joinPaths(this.basePath, this.extractMethodPath(methodAnnotations));
+    const isJaxRsMethod = this.isJaxRsHttpMethodAnnotation(annotationText);
 
     // 初始化 OpenAPI Operation 对象
     this.currentMethod = {
@@ -688,28 +873,19 @@ export class SpringControllerListener implements ParseTreeListener {
       paramsCtx.formalParameter().forEach((paramCtx) => {
         const paramAnnotations = paramCtx
           .variableModifier()
-          ?.flatMap((mod) => mod.annotation()?.text || []);
+          ?.flatMap((mod) => mod.annotation()?.text || []) || [];
         const paramType = paramCtx.typeType().text;
         const paramName = paramCtx.variableDeclaratorId().identifier().text;
 
-        // 解析参数位置和类型
-        let paramLocation = "query";
-        if (paramAnnotations?.some((a) => a.includes("PathVariable"))) {
-          paramLocation = "path";
-        } else if (paramAnnotations?.some((a) => a.includes("RequestBody"))) {
-          paramLocation = "body";
-          // 处理 @RequestBody 的 schema
-          this.currentMethod.operation.requestBody = {
-            content: {
-              "application/json": {
-                schema: this.parseRequestBodySchema(paramType),
-              },
-            },
-          };
-        }
+        const resolvedParameter = this.resolveParameterLocation(
+          paramAnnotations,
+          paramType,
+          paramName,
+          isJaxRsMethod
+        );
 
         // 解析 @ApiParam 注解（Swagger 2）
-        const apiParamAnnotation = paramAnnotations?.find((a) => a.startsWith("@ApiParam("));
+        const apiParamAnnotation = paramAnnotations.find((a) => a.startsWith("@ApiParam("));
         let paramDescription = "";
         let paramRequired = false;
         let paramExample: string | undefined;
@@ -723,13 +899,18 @@ export class SpringControllerListener implements ParseTreeListener {
           }
         }
 
+        if (resolvedParameter.isRequestBody) {
+          this.setRequestBody(paramType);
+          return;
+        }
+
         // 构建参数对象
         const paramObj: any = {
-          name: paramName,
-          in: paramLocation,
-          schema: { type: this.mapJavaTypeToOpenAPI(paramType) },
+          name: resolvedParameter.name,
+          in: resolvedParameter.location,
+          schema: this.parseParameterSchema(paramType),
           description: paramDescription,
-          required: paramRequired || paramLocation === "path",
+          required: paramRequired || resolvedParameter.required,
         };
 
         // 添加 example
@@ -791,12 +972,12 @@ export class SpringControllerListener implements ParseTreeListener {
 
   // 提取注解值（如 @GetMapping("/users") → "/users"）
   extractAnnotationValue(annotationText: string): string {
-    // 先尝试匹配 value 属性
-    const valueMatch = annotationText.match(/value\s*=\s*"([^"]+)"/);
-    if (valueMatch) return valueMatch[1];
+    const namedMatch = annotationText.match(
+      /(?:value|path)\s*=\s*(?:\{\s*)?"([^"]+)"/
+    );
+    if (namedMatch) return namedMatch[1];
 
-    // 再尝试匹配直接的路径字符串
-    const pathMatch = annotationText.match(/@[^(]+\("([^"]+)"\)/);
+    const pathMatch = annotationText.match(/@[^(]+\(\s*"([^"]+)"/);
     if (pathMatch) return pathMatch[1];
 
     return "";
@@ -998,9 +1179,15 @@ export class SpringControllerListener implements ParseTreeListener {
     if (annotationText.startsWith("@PostMapping")) return "post";
     if (annotationText.startsWith("@PutMapping")) return "put";
     if (annotationText.startsWith("@DeleteMapping")) return "delete";
+    if (annotationText.startsWith("@GET")) return "get";
+    if (annotationText.startsWith("@POST")) return "post";
+    if (annotationText.startsWith("@PUT")) return "put";
+    if (annotationText.startsWith("@DELETE")) return "delete";
     if (annotationText.startsWith("@RequestMapping")) {
       // 尝试从 method 属性获取
-      const methodMatch = annotationText.match(/method\s*=\s*([^,\s)]+)/);
+      const methodMatch = annotationText.match(
+        /method\s*=\s*(?:\{\s*)?RequestMethod\.(\w+)/
+      );
       if (methodMatch) {
         return methodMatch[1].toLowerCase();
       }

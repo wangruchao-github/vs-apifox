@@ -1,12 +1,14 @@
 # VS Apifox Helper
 
-一个用于解析 Spring Boot Controller 并生成 OpenAPI 文档的 VS Code 插件，支持一键同步到 Apifox 平台。
+一个用于解析 Java Web 接口并生成 OpenAPI 文档的 VS Code 插件，支持 Spring MVC 以及 JBoss 常见的 JAX-RS 注解，并可一键同步到 Apifox 平台。
 
 ## 功能特性
 
-- 自动解析 Spring Boot Controller 中的 API 接口
+- 自动解析 Spring MVC Controller 和 JAX-RS Resource 中的 API 接口
 - 支持 `@GetMapping`、`@PostMapping`、`@PutMapping`、`@DeleteMapping`、`@RequestMapping` 等注解
+- 支持 JAX-RS/JBoss 常见的 `@Path`、`@GET`、`@POST`、`@PUT`、`@DELETE` 注解
 - 自动提取 `@PathVariable`、`@RequestParam`、`@RequestBody` 参数信息
+- 自动提取 `@PathParam`、`@QueryParam` 参数信息
 - 生成 OpenAPI 3.0.1 规范文档
 - 一键同步 API 文档到 Apifox 平台
 - 侧边栏 API 列表视图，支持搜索和分类
@@ -134,6 +136,7 @@ public User getUserById(@PathVariable Long id) {
 - `@RestController` - 标识为控制器类
 - `@Controller` - 标识为控制器类
 - `@RequestMapping` - 类级别的基础路径
+- `@Path` - JAX-RS 资源类基础路径
 
 ### 方法级别注解
 
@@ -142,12 +145,19 @@ public User getUserById(@PathVariable Long id) {
 - `@PutMapping`
 - `@DeleteMapping`
 - `@RequestMapping`
+- `@GET`
+- `@POST`
+- `@PUT`
+- `@DELETE`
+- `@Path`
 
 ### 参数注解
 
 - `@PathVariable` - 路径参数
 - `@RequestParam` - 查询参数
 - `@RequestBody` - 请求体
+- `@PathParam` - JAX-RS 路径参数
+- `@QueryParam` - JAX-RS 查询参数
 
 ## 命令列表
 

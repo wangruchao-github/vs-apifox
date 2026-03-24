@@ -2,6 +2,20 @@
 
 所有重要的更改都将记录在此文件中。
 
+## [3.0.3] - 2026-03-24
+
+### 新增功能
+
+- **支持 JBoss/JAX-RS 注解解析**：新增对 `@Path`、`@GET`、`@POST`、`@PUT`、`@DELETE` 的识别，可与现有 Spring MVC 注解并存使用
+- **支持 JAX-RS 参数注解**：新增对 `@PathParam`、`@QueryParam` 的识别，自动映射为 OpenAPI 路径参数和查询参数
+- **新增解析回归测试**：增加 Spring MVC 与 JAX-RS 两套 parser 回归测试，便于后续演进时校验兼容性
+
+### 修复问题
+
+- **路径拼接异常**：规范化类级与方法级路径拼接，避免重复 `/` 或缺失 `/`
+- **类上下文串用**：修复跨类解析时 `currentClass` 与 `basePath` 未及时重置的问题
+- **RequestMapping 方法提取**：修复 `@RequestMapping(method = RequestMethod.X)` 的 HTTP 方法提取稳定性
+
 ## [3.0.2] - 2026-03-17
 
 ### 新增功能

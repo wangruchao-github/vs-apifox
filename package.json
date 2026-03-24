@@ -2,7 +2,7 @@
   "name": "vs-apifox-helper",
   "displayName": "VS APIFOX Helper",
   "description": "VS APIFOX Helper",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "publisher": "wangrc",
   "engines": {
     "vscode": "^1.100.0"
@@ -150,6 +150,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "test:parser": "npm run compile && node out/test/parser.test.js",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "publish": "vsce publish"
