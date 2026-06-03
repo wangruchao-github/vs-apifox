@@ -15,6 +15,7 @@ export class SpringControllerListener implements ParseTreeListener {
   currentMethod: any;
   comments: Map<string, string[]>; // 改为 Map 类型
   classDefinitions: { [key: string]: any }; // 存储类定义
+  schemaExtends: { [key: string]: string }; // 子类 -> 父类，供 resolveInheritance 合并继承字段
   endpoints: ApiEndpoint[];
   filePath: string;
 
@@ -33,6 +34,7 @@ export class SpringControllerListener implements ParseTreeListener {
     this.currentMethod = null;
     this.comments = new Map();
     this.classDefinitions = {}; // 存储类定义
+    this.schemaExtends = {};
     this.endpoints = [];
     this.filePath = '';
   }
@@ -211,10 +213,20 @@ export class SpringControllerListener implements ParseTreeListener {
   // 解析类定义并生成 schema
   parseClassSchema(className: string, ctx: ClassDeclarationContext) {
     if (this.openapi.hasSchema(className)) return; // 避免重复解析
+
+    // 记录继承关系（extends 父类），全部解析完后由 resolveInheritance 合并父类字段
+    if (ctx.EXTENDS?.() && ctx.typeType?.()) {
+      const superName = ctx.typeType()!.text.replace(/<.*>$/, "").replace(/\[\]$/, "");
+      if (/^[A-Za-z_]/.test(superName)) {
+        this.schemaExtends[className] = superName;
+      }
+    }
+
     const schema: {
       type: string;
       properties: { [key: string]: any };
       description: string;
+      required?: string[];
     } = {
       type: "object",
       properties: {},
@@ -273,9 +285,13 @@ export class SpringControllerListener implements ParseTreeListener {
               if (apiModelProperty.value) {
                 fieldSchema.description = apiModelProperty.value;
               }
-              if (apiModelProperty.required !== undefined) {
-                // OpenAPI 3.0 中 required 是在 schema 级别定义的
-                fieldSchema.required = apiModelProperty.required;
+              if (apiModelProperty.required) {
+                // OpenAPI 3.0 中 required 是对象 schema 级别的字段名数组，
+                // 不是属性 schema 上的布尔值。放在属性上 Apifox 会忽略，导致全部显示为可选。
+                if (!schema.required) {
+                  schema.required = [];
+                }
+                schema.required.push(fieldName);
               }
               if (apiModelProperty.example) {
                 fieldSchema.example = apiModelProperty.example;
@@ -300,12 +316,54 @@ export class SpringControllerListener implements ParseTreeListener {
             }
           }
 
+          // JSR-303/380 校验注解（@NotNull/@NotBlank/@NotEmpty）也视为必填。
+          // 很多项目不用 @ApiModelProperty(required=true) 而是用校验注解表达必填，
+          // 这里一并映射进对象级 required 数组，避免 Apifox 全部显示可选。
+          if (this.hasRequiredValidation(decl)) {
+            if (!schema.required) {
+              schema.required = [];
+            }
+            if (!schema.required.includes(fieldName)) {
+              schema.required.push(fieldName);
+            }
+          }
+
           schema.properties[fieldName] = fieldSchema;
         }
       });
 
     // 注册 schema
     this.openapi.addSchema(className, schema);
+  }
+
+  // 全部文件解析完后调用：把父类（extends）的字段和必填合并进子类 schema。
+  // 很多项目把公共字段（如签名 sign、业务线 busType，且常带 JSR-303 必填）放在 BaseCmd 等父类里，
+  // 不合并的话子类 schema 会整段丢失这些字段及其必填。子类同名字段优先。
+  resolveInheritance() {
+    const schemas = this.openapi.openapi.components.schemas;
+
+    const merge = (name: string, seen: Set<string>) => {
+      const parentName = this.schemaExtends[name];
+      if (!parentName || seen.has(name)) return;
+      seen.add(name);
+      merge(parentName, seen); // 先把祖父类并进父类，再并进子类（支持多级继承）
+
+      const child = schemas[name];
+      const parent = schemas[parentName];
+      if (!child || !parent || !parent.properties) return;
+
+      // 父字段并入子（子同名字段优先）
+      child.properties = { ...parent.properties, ...child.properties };
+
+      // 必填取并集，且只保留合并后确实存在的字段
+      if (Array.isArray(parent.required) && parent.required.length > 0) {
+        const req = new Set<string>(child.required || []);
+        parent.required.forEach((f: string) => req.add(f));
+        child.required = [...req].filter((f) => child.properties[f]);
+      }
+    };
+
+    Object.keys(this.schemaExtends).forEach((name) => merge(name, new Set()));
   }
 
   // 解析字段类型（支持嵌套对象、集合类型和枚举）
@@ -316,7 +374,6 @@ export class SpringControllerListener implements ParseTreeListener {
       items?: any;
       $ref?: string;
       enum?: any[];
-      required?: boolean;
       example?: string;
       minimum?: number;
       maximum?: number;
@@ -723,13 +780,21 @@ export class SpringControllerListener implements ParseTreeListener {
           }
         }
 
+        // 解析 @RequestParam 注解：Spring 中默认 required=true，仅当显式 required = false 时才可选。
+        // 原先只看 @ApiParam，导致没写 @ApiParam 的查询参数全部被标成可选。
+        const requestParamAnnotation = paramAnnotations?.find((a) => a.includes("RequestParam"));
+        let requestParamRequired = false;
+        if (requestParamAnnotation) {
+          requestParamRequired = !/required\s*=\s*false/.test(requestParamAnnotation);
+        }
+
         // 构建参数对象
         const paramObj: any = {
           name: paramName,
           in: paramLocation,
           schema: { type: this.mapJavaTypeToOpenAPI(paramType) },
           description: paramDescription,
-          required: paramRequired || paramLocation === "path",
+          required: paramRequired || requestParamRequired || paramLocation === "path",
         };
 
         // 添加 example
@@ -990,6 +1055,19 @@ export class SpringControllerListener implements ParseTreeListener {
     }
 
     return null;
+  }
+
+  // 字段是否带 JSR-303/380 必填校验注解（@NotNull/@NotBlank/@NotEmpty）
+  private hasRequiredValidation(decl: any): boolean {
+    const modifiers = decl.modifier?.() || [];
+    for (const mod of modifiers) {
+      const classOrInterfaceMod = mod.classOrInterfaceModifier?.();
+      const annot = classOrInterfaceMod?.annotation?.();
+      if (annot && annot.text && /^@(NotNull|NotBlank|NotEmpty)\b/.test(annot.text)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // 提取 HTTP 方法（如 @GetMapping → get）
