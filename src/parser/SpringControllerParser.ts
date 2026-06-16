@@ -51,6 +51,8 @@ export class SpringControllerParser {
         console.error("解析失败:", file.fsPath, error);
       }
     }
+    // 所有文件解析完后再合并继承字段（父类可能在后面的文件里）
+    controllerListener.resolveInheritance();
     if(controllerListener.endpoints.length > 0){
       controllerListener.endpoints[0].schemas = openapiGenerator.openapi.components.schemas;
     }
